@@ -1064,6 +1064,61 @@ const LS_KEY='pump_quote_custom_v3';
 function loadCustom(){try{const a=JSON.parse(localStorage.getItem(LS_KEY)||'[]');return Array.isArray(a)?a.filter(x=>x&&x.model&&isFinite(x.price)&&x.price>0):[];}catch(e){return [];}}
 function saveCustom(list){localStorage.setItem(LS_KEY,JSON.stringify(list));}
 
+const LS_SERIES='pump_quote_series_v1';
+const LS_OWNERS='pump_quote_owners_v1';
+let CUSTOM_SERIES=[], CUSTOM_OWNERS=[];
+
+function loadExtraSets(){
+  try{ CUSTOM_SERIES = JSON.parse(localStorage.getItem(LS_SERIES)||'[]'); }catch(e){ CUSTOM_SERIES=[]; }
+  try{ CUSTOM_OWNERS = JSON.parse(localStorage.getItem(LS_OWNERS)||'[]'); }catch(e){ CUSTOM_OWNERS=[]; }
+  if(!Array.isArray(CUSTOM_SERIES)) CUSTOM_SERIES=[];
+  if(!Array.isArray(CUSTOM_OWNERS)) CUSTOM_OWNERS=[];
+}
+function saveExtraSets(){
+  localStorage.setItem(LS_SERIES, JSON.stringify(CUSTOM_SERIES));
+  localStorage.setItem(LS_OWNERS, JSON.stringify(CUSTOM_OWNERS));
+}
+
+function syncSeriesUI(){
+  const isNew = $('fSeries').value === NEW_OPT;
+  $('fSeries').style.display = isNew ? 'none' : '';
+  $('fSeriesNew').style.display = isNew ? 'block' : 'none';
+  if(isNew) setTimeout(()=>$('fSeriesNew').focus(), 0);
+}
+function syncOwnerUI(){
+  const isNew = $('fOwner').value === NEW_OPT;
+  $('fOwner').style.display = isNew ? 'none' : '';
+  $('fOwnerNew').style.display = isNew ? 'block' : 'none';
+  if(isNew) setTimeout(()=>$('fOwnerNew').focus(), 0);
+}
+
+function commitNewSeries(){
+  if($('fSeriesNew').style.display === 'none') return;
+  const v = $('fSeriesNew').value.trim();
+  if(v){
+    if(!CUSTOM_SERIES.includes(v)){ CUSTOM_SERIES.push(v); saveExtraSets(); }
+    refreshFormOptions();
+    $('fSeries').value = v;
+  } else {
+    $('fSeries').value = '';
+  }
+  $('fSeriesNew').value = '';
+  syncSeriesUI();
+}
+function commitNewOwner(){
+  if($('fOwnerNew').style.display === 'none') return;
+  const v = $('fOwnerNew').value.trim();
+  if(v){
+    if(!CUSTOM_OWNERS.includes(v)){ CUSTOM_OWNERS.push(v); saveExtraSets(); }
+    refreshFormOptions();
+    $('fOwner').value = v;
+  } else {
+    $('fOwner').value = '';
+  }
+  $('fOwnerNew').value = '';
+  syncOwnerUI();
+}
+
 let DB=[], CUSTOM=[];
 
 function rebuildDB(){
@@ -1189,19 +1244,20 @@ function refreshSeriesOptions(){
 const NEW_OPT = '__new__';
 
 function refreshFormOptions(){
-  // 系列下拉
+    // 系列下拉（合并 DB 中的系列 + 用户新增的系列）
   const sSel = $('fSeries');
   const curS = sSel.value;
-  const sList = [...new Set(DB.map(d=>d.series))].filter(Boolean).sort((a,b)=>a.localeCompare(b,'zh'));
+  const sList = [...new Set([...DB.map(d=>d.series), ...CUSTOM_SERIES])]
+    .filter(Boolean).sort((a,b)=>a.localeCompare(b,'zh'));
   sSel.innerHTML = '<option value="">—</option>' +
     sList.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('') +
     `<option value="${NEW_OPT}">${t('newSeries')}</option>`;
   if(sList.includes(curS) || curS === NEW_OPT) sSel.value = curS;
 
-  // 负责人下拉（从 RAW 和自建数据中提取）
+    // 负责人下拉（RAW + 自建数据 + 用户新增的负责人）
   const oSel = $('fOwner');
   const curO = oSel.value;
-  const oSet = new Set();
+  const oSet = new Set(CUSTOM_OWNERS);
   RAW.forEach(r=>{ if(r[4]) oSet.add(r[4]); });
   CUSTOM.forEach(c=>{ if(c.owner) oSet.add(c.owner); });
   const oList = [...oSet].sort((a,b)=>a.localeCompare(b,'zh'));
@@ -1265,29 +1321,29 @@ function startEdit(ts){
   const seriesOK = [...$('fSeries').options].some(o => o.value === c.series && o.value !== NEW_OPT);
   if(seriesOK){
     $('fSeries').value = c.series;
-    $('fSeriesNew').style.display = 'none';
+    $('fSeriesNew').value = '';
   } else if(c.series){
     $('fSeries').value = NEW_OPT;
     $('fSeriesNew').value = c.series;
-    $('fSeriesNew').style.display = 'block';
   } else {
     $('fSeries').value = '';
-    $('fSeriesNew').style.display = 'none';
+    $('fSeriesNew').value = '';
   }
+  syncSeriesUI();
 
   // 负责人回填
   const ownerOK = [...$('fOwner').options].some(o => o.value === c.owner && o.value !== NEW_OPT);
   if(ownerOK){
     $('fOwner').value = c.owner;
-    $('fOwnerNew').style.display = 'none';
+    $('fOwnerNew').value = '';
   } else if(c.owner){
     $('fOwner').value = NEW_OPT;
     $('fOwnerNew').value = c.owner;
-    $('fOwnerNew').style.display = 'block';
   } else {
     $('fOwner').value = '';
-    $('fOwnerNew').style.display = 'none';
+    $('fOwnerNew').value = '';
   }
+  syncOwnerUI();
 
   $('btnAdd').textContent = editingId !== null ? t('updateBtn') : t('addBtn');
   $('btnCancelEdit').textContent = LANG==='zh' ? '取消编辑' : 'Отменить';
@@ -1298,10 +1354,10 @@ function startEdit(ts){
 
 function cancelEdit(){
   editingId = null;
-  $('fModel').value=''; $('fPrice').value=''; $('fNote').value=''; $('fDate').value='';
-  $('fSeries').value=''; $('fOwner').value='';
-  $('fSeriesNew').value=''; $('fSeriesNew').style.display='none';
-  $('fOwnerNew').value=''; $('fOwnerNew').style.display='none';
+  $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
+  $('fSeries').value='';$('fOwner').value='';
+  $('fSeriesNew').value='';$('fOwnerNew').value='';
+  syncSeriesUI(); syncOwnerUI();
   $('btnAdd').textContent = t('addBtn');
   $('btnCancelEdit').style.display = 'none';
 }
@@ -1418,6 +1474,22 @@ $('btnAdd').onclick=()=>{
   $('q').value=model; doSearch();
 };
 
+/* ===== 下拉 ↔ 输入框 切换与提交 ===== */
+$('fSeries').addEventListener('change', syncSeriesUI);
+$('fOwner').addEventListener('change', syncOwnerUI);
+
+$('fSeriesNew').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); commitNewSeries(); }
+  if(e.key==='Escape'){ $('fSeriesNew').value=''; $('fSeries').value=''; syncSeriesUI(); }
+});
+$('fSeriesNew').addEventListener('blur', commitNewSeries);
+
+$('fOwnerNew').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ e.preventDefault(); commitNewOwner(); }
+  if(e.key==='Escape'){ $('fOwnerNew').value=''; $('fOwner').value=''; syncOwnerUI(); }
+});
+$('fOwnerNew').addEventListener('blur', commitNewOwner);
+
 $('btnCancelEdit').onclick = cancelEdit;
 
 $('btnExport').onclick=()=>{
@@ -1434,6 +1506,7 @@ $('btnExport').onclick=()=>{
    ========================================================= */
 (function initApp(){
   try{
+    loadExtraSets();
     CUSTOM = loadCustom();
     rebuildDB();
     refreshStats();
