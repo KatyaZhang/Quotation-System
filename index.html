@@ -1242,15 +1242,21 @@ function renderResults(list,query){
         </table>
       </details>`;
     }
+
+    const on = !!DRAWINGS[it.key];
+
     return `<div class="res-card${isSelf?' self':''}">
-      const on = !!DRAWINGS[it.key];
-return `<div class="res-card${isSelf?' self':''}">
-  <div class="res-top">
-    <span class="model">${esc(it.model)}</span>
-    <span class="drawing-tag${on?' on':''}" data-key="${esc(it.key)}" title="${esc(t('drawingTip'))}">${on ? t('withDrawing') : t('withoutDrawing')}</span>
-    <span class="badge">${esc(it.series||t('other'))}</span>
-    <span class="match">${t('matchPct')} ${pct}%</span>
-  </div>;
+      <div class="res-top">
+        <span class="model">${esc(it.model)}</span>
+        <span class="drawing-tag${on?' on':''}" data-key="${esc(it.key)}" title="${esc(t('drawingTip'))}">${on ? t('withDrawing') : t('withoutDrawing')}</span>
+        <span class="badge">${esc(it.series||t('other'))}</span>
+        <span class="match">${t('matchPct')} ${pct}%</span>
+      </div>
+      <div class="price">${priceText(it)}<small>${it.count>1?t('quoteCount',{n:it.count}):t('refPrice')}</small></div>
+      ${ldHtml}
+      <div class="meta">${t('disclaimer')}</div>
+      ${detailHtml}
+    </div>`;
   };
 
   if(exact.length) html+=`<h2 class="sec">${t('exactMatch')}</h2><div class="res">${exact.map(x=>card(x,true)).join('')}</div>`;
