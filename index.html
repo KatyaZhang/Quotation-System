@@ -82,6 +82,12 @@
   .own-item .s{font-size:12px;color:#64748b;background:#e0f2fe;padding:1px 8px;border-radius:5px}
   .own-item .p{margin-left:auto;color:#dc2626;font-weight:700}
   .hint{font-size:12.5px;color:#94a3b8;margin-top:10px;line-height:1.7}
+  .drawing-tag{font-size:12px;padding:2px 9px;border-radius:6px;cursor:pointer;user-select:none;
+    background:#f1f5f9;color:#64748b;border:1px dashed #cbd5e1;font-weight:600;
+    transition:.15s;white-space:nowrap}
+  .drawing-tag:hover{background:#e2e8f0;border-color:#94a3b8}
+  .drawing-tag.on{background:#dcfce7;color:#15803d;border:1px solid #86efac}
+  .drawing-tag.on:hover{background:#bbf7d0}
   @media(max-width:560px){.hero h1{font-size:20px}.price{font-size:20px}#q,select,button{height:48px}.lang-switch{top:12px;right:12px}.detail-table th,.detail-table td{padding:6px 8px;font-size:12.5px}}
   .manage-box{margin-top:16px;border-top:1px dashed #e2e8f0;padding-top:12px}
   .manage-box summary{cursor:pointer;font-size:13.5px;font-weight:600;color:#64748b;list-style:none;outline:none}
@@ -227,6 +233,9 @@ const I18N = {
     addedPending:"📝 已保存为待完善数据",
     noCustomData:"暂无待完善数据",
     manageTitle:"管理已添加的自建数据",
+    withDrawing:"📐 带图纸",
+    withoutDrawing:"📐 带图纸?",
+    drawingTip:"点击切换是否带图纸",
     priceLabel:"报价", owner:"负责人", date:"日期"
   },
   ru: {
@@ -283,6 +292,9 @@ const I18N = {
     addedPending:"📝 Сохранено как неполные данные",
     noCustomData:"Нет неполных данных",
     manageTitle:"Управление своими данными",
+    withDrawing:"📐 С чертежом",
+    withoutDrawing:"📐 Чертеж?",
+    drawingTip:"Нажмите, чтобы отметить наличие чертежа",
     priceLabel:"Цена", owner:"Ответственный", date:"Дата"
   }
 };
@@ -1121,6 +1133,7 @@ function commitNewSeries(){
   $('fSeriesNew').value = '';
   syncSeriesUI();
 }
+ 
 function commitNewOwner(){
   if($('fOwnerNew').style.display === 'none') return;
   const v = $('fOwnerNew').value.trim();
@@ -1136,6 +1149,15 @@ function commitNewOwner(){
 }
 
 let DB=[], CUSTOM=[];
+const LS_DRAWING = 'pump_quote_drawings_v1';
+let DRAWINGS = {};
+function loadDrawings(){
+  try{ DRAWINGS = JSON.parse(localStorage.getItem(LS_DRAWING)||'{}') || {}; }catch(e){ DRAWINGS = {}; }
+  if(typeof DRAWINGS !== 'object' || Array.isArray(DRAWINGS)) DRAWINGS = {};
+}
+function saveDrawings(){
+  localStorage.setItem(LS_DRAWING, JSON.stringify(DRAWINGS));
+}
 
 function rebuildDB(){
   const map=new Map();
@@ -1221,16 +1243,14 @@ function renderResults(list,query){
       </details>`;
     }
     return `<div class="res-card${isSelf?' self':''}">
-      <div class="res-top">
-        <span class="model">${esc(it.model)}</span>
-        <span class="badge">${esc(it.series||t('other'))}</span>
-        <span class="match">${t('matchPct')} ${pct}%</span>
-      </div>
-      <div class="price">${priceText(it)}<small>${it.count>1?t('quoteCount',{n:it.count}):t('refPrice')}</small></div>
-      ${ldHtml}
-      <div class="meta">${t('disclaimer')}</div>
-      ${detailHtml}
-    </div>`;
+      const on = !!DRAWINGS[it.key];
+return `<div class="res-card${isSelf?' self':''}">
+  <div class="res-top">
+    <span class="model">${esc(it.model)}</span>
+    <span class="drawing-tag${on?' on':''}" data-key="${esc(it.key)}" title="${esc(t('drawingTip'))}">${on ? t('withDrawing') : t('withoutDrawing')}</span>
+    <span class="badge">${esc(it.series||t('other'))}</span>
+    <span class="match">${t('matchPct')} ${pct}%</span>
+  </div>;
   };
 
   if(exact.length) html+=`<h2 class="sec">${t('exactMatch')}</h2><div class="res">${exact.map(x=>card(x,true)).join('')}</div>`;
@@ -1452,6 +1472,17 @@ function setLang(lang){
 /* =========================================================
    9. 事件
    ========================================================= */
+resultsEl.addEventListener('click', (e)=>{
+  const tag = e.target.closest('.drawing-tag');
+  if(!tag) return;
+  const key = tag.dataset.key;
+  if(DRAWINGS[key]) delete DRAWINGS[key];
+  else DRAWINGS[key] = true;
+  saveDrawings();
+  const on = !!DRAWINGS[key];
+  tag.classList.toggle('on', on);
+  tag.textContent = on ? t('withDrawing') : t('withoutDrawing');
+});
 $('btnSearch').onclick=doSearch;
 $('q').addEventListener('keydown',e=>{if(e.key==='Enter') doSearch();});
 $('series').addEventListener('change',()=>{if($('q').value.trim()) doSearch();});
@@ -1531,6 +1562,7 @@ $('btnExport').onclick=()=>{
 (function initApp(){
   try{
     loadExtraSets();
+    loadDrawings();
     CUSTOM = loadCustom();
     rebuildDB();
     refreshStats();
