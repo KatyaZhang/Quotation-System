@@ -1093,7 +1093,7 @@ function loadCustom(){
     return a.filter(x=>x && x.model).map(x=>{
       if(!isFinite(x.price)) x.price = 0;
       if(typeof x.complete === 'undefined'){
-        x.complete = !!(x.model && x.series && x.price>0 && x.date && x.owner);
+        x.complete = !!(x.model && x.series && x.price>0 && x.date && x.date.length === 6 && x.owner);
       if(typeof x.drawing === 'undefined') x.drawing = false;
       }
       return x;
@@ -1171,8 +1171,10 @@ function saveDrawings(){
 
 function rebuildDB(){
   const map=new Map();
-  const push=(model,series,price,date,owner,isCustom)=>{
+  const push=(model,series,price,date,owner,isCustom,complete)=>{
     if(!model || !isFinite(price) || price<=0) return;
+    // 自建数据：必须五项齐全（complete=true）才进入数据库
+    if(isCustom && !complete) return;
     const key=norm(model); if(!key) return;
     if(!map.has(key)) map.set(key,{model:String(model).trim(),series:series||'其它',records:[],custom:!!isCustom,key});
     const rec=map.get(key);
@@ -1180,8 +1182,8 @@ function rebuildDB(){
     if(isCustom) rec.custom=true;
     if((!rec.series||rec.series==='其它') && series) rec.series=series;
   };
-  RAW.forEach(([m,s,p,d,o])=>push(m,s,p,d,o,false));
-  CUSTOM.forEach(c=>push(c.model,c.series,c.price,c.date||'',c.owner||'',true));
+  RAW.forEach(([m,s,p,d,o])=>push(m,s,p,d,o,false,true));
+  CUSTOM.forEach(c=>push(c.model,c.series,c.price,c.date||'',c.owner||'',true,!!c.complete));
   DB=[...map.values()].map(r=>{
     const prices=r.records.map(x=>x.price).sort((a,b)=>a-b);
     const uniq=[...new Set(prices)];
@@ -1528,7 +1530,13 @@ $('btnAdd').onclick=()=>{
   if(priceRaw !== '' && (!isFinite(price) || price <= 0)){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
 
   // 五项基本信息：型号、系列、价格、日期、负责人 —— 全部有值才算完整
-  const isComplete = !!(model && series && priceRaw !== '' && isFinite(price) && price > 0 && date && owner);
+  const isComplete = !!(
+    model && model.trim() &&
+    series && String(series).trim() &&
+    priceRaw !== '' && isFinite(price) && price > 0 &&
+    date && date.length === 6 &&
+    owner && String(owner).trim()
+  );
   const savedPrice = isFinite(price) ? price : 0;
 
   if(editingId !== null){
