@@ -150,6 +150,13 @@
         <input id="fDate" type="date">
       </div>
       <div class="field">
+        <label id="i18nFDrawing">是否有图纸</label>
+        <select id="fDrawing">
+          <option value="0">无图纸</option>
+          <option value="1">✅ 有现成图纸</option>
+        </select>
+      </div>
+      <div class="field">
         <label id="i18nFOwner">负责人</label>
         <select id="fOwner"></select>
         <input id="fOwnerNew" placeholder="请输入新负责人" style="display:none;margin-top:6px">
@@ -236,6 +243,7 @@ const I18N = {
     withDrawing:"✅ 有现成图纸",
     withoutDrawing:"无图纸",
     drawingTip:"点击标记为有现成图纸",
+    fDrawing:"是否有图纸",
     priceLabel:"报价", owner:"负责人", date:"日期"
   },
   ru: {
@@ -295,6 +303,7 @@ const I18N = {
     withDrawing:"✅ Есть готовый чертёж",
     withoutDrawing:"Без чертежа",
     drawingTip:"Нажмите, чтобы отметить наличие готового чертежа",
+    fDrawing:"Наличие чертежа",
     priceLabel:"Цена", owner:"Ответственный", date:"Дата"
   }
 };
@@ -1085,6 +1094,7 @@ function loadCustom(){
       if(!isFinite(x.price)) x.price = 0;
       if(typeof x.complete === 'undefined'){
         x.complete = !!(x.model && x.series && x.price>0 && x.date && x.owner);
+      if(typeof x.drawing === 'undefined') x.drawing = false;
       }
       return x;
     });
@@ -1350,6 +1360,8 @@ function startEdit(ts){
   const c = CUSTOM.find(x => x.ts === ts);
   if(!c) return;
   editingId = ts;
+  const dk = norm(c.model);
+  $('fDrawing').value = DRAWINGS[dk] ? '1' : '0';
 
   $('fModel').value = c.model || '';
   $('fPrice').value = c.price || '';
@@ -1402,6 +1414,7 @@ function cancelEdit(){
   $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
   $('fSeries').value='';$('fOwner').value='';
   $('fSeriesNew').value='';$('fOwnerNew').value='';
+  $('fDrawing').value = '0';
   syncSeriesUI(); syncOwnerUI();
   $('btnAdd').textContent = t('addBtn');
   $('btnCancelEdit').style.display = 'none';
@@ -1461,6 +1474,7 @@ function setLang(lang){
   $('i18nManage').textContent = t('manageTitle');
   $('i18nFDate').textContent = t('fDate');
   $('i18nFOwner').textContent = t('fOwner');
+  $('i18nFDrawing').textContent = t('fDrawing');
   $('fSeriesNew').placeholder = t('fSeriesNewPh');
   $('fOwnerNew').placeholder = t('fOwnerNewPh');
 
@@ -1507,6 +1521,7 @@ $('btnAdd').onclick=()=>{
   if(owner === NEW_OPT) owner = $('fOwnerNew').value.trim();
 
   const dv = $('fDate').value;
+  const hasDrawing = $('fDrawing').value === '1';
   const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
 
   if(!model){showToast(t('needModel'),'err');$('fModel').focus();return;}
@@ -1519,15 +1534,20 @@ $('btnAdd').onclick=()=>{
   if(editingId !== null){
     const idx = CUSTOM.findIndex(x=>x.ts === editingId);
     if(idx >= 0){
-      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, complete: isComplete};
+      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, complete: isComplete};
     }
     editingId = null;
     showToast(isComplete ? t('addedToDb') : t('updated'),'ok');
   } else {
-    CUSTOM.push({model, series, price: savedPrice, note, date, owner, ts: Date.now(), complete: isComplete});
+    CUSTOM.push({model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, ts: Date.now(), complete: isComplete});
     showToast(isComplete ? t('addedToDb') : t('addedPending'),'ok');
   }
-
+  const drawKey = norm(model);
+  if(drawKey){
+    if(hasDrawing) DRAWINGS[drawKey] = true;
+    else delete DRAWINGS[drawKey];
+    saveDrawings();
+  }
   saveCustom(CUSTOM); rebuildDB();
   refreshStats(); refreshSeriesOptions(); refreshFormOptions(); renderOwnList();
 
@@ -1570,6 +1590,12 @@ $('btnExport').onclick=()=>{
     loadExtraSets();
     loadDrawings();
     CUSTOM = loadCustom();
+    CUSTOM.forEach(c => {
+      if(c.drawing && c.model){
+        const k = norm(c.model);
+        if(k) DRAWINGS[k] = true;
+      }
+    });
     rebuildDB();
     refreshStats();
     refreshSeriesOptions();
