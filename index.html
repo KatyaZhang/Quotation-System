@@ -1094,12 +1094,13 @@ function loadCustom(){
       if(!isFinite(x.price)) x.price = 0;
       if(typeof x.complete === 'undefined'){
         x.complete = !!(x.model && x.series && x.price>0 && x.date && x.date.length === 6 && x.owner);
-      if(typeof x.drawing === 'undefined') x.drawing = false;
       }
+      if(typeof x.drawing === 'undefined') x.drawing = false;
       return x;
     });
   }catch(e){ return []; }
 }
+ 
 function saveCustom(list){localStorage.setItem(LS_KEY,JSON.stringify(list));}
 
 const LS_SERIES='pump_quote_series_v1';
@@ -1528,20 +1529,21 @@ $('btnAdd').onclick=()=>{
   const dv = $('fDate').value;
   const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
 
-  if(!model){showToast(t('needModel'),'err');$('fModel').focus();return;}
-  if(priceRaw !== '' && (!isFinite(price) || price <= 0)){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
+  // 逐项收集缺失项
+  const missing = [];
+  if(!model) missing.push('型号名称');
+  if(!series) missing.push('所属系列');
+  if(priceRaw === '' || !isFinite(price) || price <= 0) missing.push('参考单价');
+  if(!date || date.length !== 6) missing.push('报价日期');
+  if(!owner) missing.push('负责人');
 
-  // 五项完整性判断（逐项严格校验）
-  const cModel  = !!model;
-  const cSeries = !!series;
-  const cPrice  = priceRaw !== '' && isFinite(price) && price > 0;
-  const cDate   = !!date && date.length === 6;
-  const cOwner  = !!owner;
-  const isComplete = cModel && cSeries && cPrice && cDate && cOwner;
+  if(missing.length){
+    showToast('请填写：' + missing.join('、'), 'err');
+    return;  // 直接阻止提交，避免产生无用的待完善记录
+  }
 
-  // 调试输出：提交时在控制台打印五项状态，方便排查
-  console.log('[提交校验]', {model, series, priceRaw, date, owner, cModel, cSeries, cPrice, cDate, cOwner, isComplete});
-
+  // 五项齐全，直接入库
+  const isComplete = true;
   const savedPrice = isFinite(price) ? price : 0;
 
   if(editingId !== null){
@@ -1550,17 +1552,16 @@ $('btnAdd').onclick=()=>{
       CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, complete: isComplete};
     }
     editingId = null;
-    showToast(isComplete ? t('addedToDb') : t('addedPending'),'ok');
   } else {
     CUSTOM.push({model, series, price: savedPrice, note, date, owner, ts: Date.now(), complete: isComplete});
-    showToast(isComplete ? t('addedToDb') : t('addedPending'),'ok');
   }
 
   saveCustom(CUSTOM); rebuildDB();
   refreshStats(); refreshSeriesOptions(); refreshFormOptions(); renderOwnList();
 
   cancelEdit();
-  $('q').value=model; doSearch();
+  showToast(t('addedToDb'), 'ok');
+  $('q').value = model; doSearch();
 };
 
 /* ===== 下拉 ↔ 输入框 切换与提交 ===== */
