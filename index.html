@@ -83,6 +83,13 @@
   .own-item .p{margin-left:auto;color:#dc2626;font-weight:700}
   .hint{font-size:12.5px;color:#94a3b8;margin-top:10px;line-height:1.7}
   @media(max-width:560px){.hero h1{font-size:20px}.price{font-size:20px}#q,select,button{height:48px}.lang-switch{top:12px;right:12px}.detail-table th,.detail-table td{padding:6px 8px;font-size:12.5px}}
+  .manage-box{margin-top:16px;border-top:1px dashed #e2e8f0;padding-top:12px}
+  .manage-box summary{cursor:pointer;font-size:13.5px;font-weight:600;color:#64748b;list-style:none;outline:none}
+  .manage-box summary::-webkit-details-marker{display:none}
+  .manage-box summary::before{content:"▸";margin-right:6px;display:inline-block;transition:.15s;font-size:12px}
+  .manage-box[open] summary::before{transform:rotate(90deg)}
+  .edit-btn{background:#dbeafe;color:#1d4ed8;height:34px;padding:0 12px;font-size:13px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
+  .edit-btn:hover{background:#bfdbfe;box-shadow:none;transform:none}
 </style>
 </head>
 <body>
@@ -148,11 +155,15 @@
     </div>
     <div class="form-actions">
       <button id="btnAdd">➕ 加入报价数据库</button>
+      <button id="btnCancelEdit" class="ghost" style="display:none">取消编辑</button>
       <button id="btnExport" class="ghost">导出我的数据</button>
       <span class="toast" id="toast"></span>
     </div>
     <div class="hint" id="i18nHint">提示：补充的数据保存在本机浏览器（localStorage），刷新页面不会丢失；导出后可备份到其他设备。</div>
-    <div class="own-list" id="ownList" style="display:none"></div>
+    <details class="manage-box">
+      <summary id="i18nManage">管理已添加的自建数据</summary>
+      <div class="own-list" id="ownList"></div>
+    </details>
   </div>
 
 </div>
@@ -209,6 +220,11 @@ const I18N = {
     delete:"删除",
     custom:"自建",
     other:"其它",
+    editBtn:"编辑",
+    updateBtn:"💾 更新报价",
+    updated:"✅ 已更新",
+    noCustomData:"暂无自建数据",
+    manageTitle:"管理已添加的自建数据",
     priceLabel:"报价", owner:"负责人", date:"日期"
   },
   ru: {
@@ -258,6 +274,11 @@ const I18N = {
     delete:"Удалить",
     custom:"Своя",
     other:"Прочее",
+    editBtn:"Изменить",
+    updateBtn:"💾 Обновить",
+    updated:"✅ Обновлено",
+    noCustomData:"Нет своих данных",
+    manageTitle:"Управление своими данными",
     priceLabel:"Цена", owner:"Ответственный", date:"Дата"
   }
 };
@@ -1132,7 +1153,6 @@ function renderResults(list,query){
       <div class="res-top">
         <span class="model">${esc(it.model)}</span>
         <span class="badge">${esc(it.series||t('other'))}</span>
-        ${it.custom?`<span class="badge own">${t('custom')}</span>`:''}
         <span class="match">${t('matchPct')} ${pct}%</span>
       </div>
       <div class="price">${priceText(it)}<small>${it.count>1?t('quoteCount',{n:it.count}):t('refPrice')}</small></div>
@@ -1192,27 +1212,100 @@ function refreshFormOptions(){
 }
  
 function renderOwnList(){
-  const el=$('ownList');
-  if(!CUSTOM.length){el.innerHTML='';return;}
-  el.innerHTML=CUSTOM.map((c,i)=>`
+  const el = $('ownList');
+  if(!CUSTOM.length){
+    el.innerHTML = `<div style="padding:12px;color:#94a3b8;font-size:13px;text-align:center">${t('noCustomData')}</div>`;
+    return;
+  }
+  el.innerHTML = CUSTOM.map((c,i)=>`
     <div class="own-item">
       <span class="n">${esc(c.model)}</span>
       ${c.series?`<span class="s">${esc(c.series)}</span>`:''}
+      ${c.date?`<span style="color:#64748b;font-size:12.5px">${formatDate(c.date,LANG)}</span>`:''}
+      ${c.owner?`<span style="color:#64748b;font-size:12.5px">${esc(c.owner)}</span>`:''}
       ${c.note?`<span style="color:#94a3b8;font-size:12.5px">${esc(c.note)}</span>`:''}
       <span class="p">${fmt(c.price)}</span>
+      <button class="edit-btn" data-ts="${c.ts}">${t('editBtn')}</button>
       <button class="danger" data-i="${i}">${t('delete')}</button>
     </div>`).join('');
+  el.querySelectorAll('.edit-btn').forEach(btn=>{
+    btn.onclick = () => startEdit(+btn.dataset.ts);
+  });
   el.querySelectorAll('button.danger').forEach(btn=>{
-    btn.onclick=()=>{
-      const i=+btn.dataset.i;
+    btn.onclick = () => {
+      const i = +btn.dataset.i;
+      if(editingId === CUSTOM[i].ts) cancelEdit();
       CUSTOM.splice(i,1); saveCustom(CUSTOM); rebuildDB();
-      refreshStats(); refreshSeriesOptions(); renderOwnList();
+      refreshStats(); refreshSeriesOptions(); refreshFormOptions(); renderOwnList();
       showToast(t('deleted'),'ok');
-      const q=$('q').value.trim(); if(q) doSearch(); else resultsEl.innerHTML='';
+      const q = $('q').value.trim(); if(q) doSearch(); else resultsEl.innerHTML='';
     };
   });
 }
 
+let editingId = null;
+
+function startEdit(ts){
+  const c = CUSTOM.find(x => x.ts === ts);
+  if(!c) return;
+  editingId = ts;
+
+  $('fModel').value = c.model || '';
+  $('fPrice').value = c.price || '';
+  $('fNote').value = c.note || '';
+
+  // 日期回填 YYMMDD → YYYY-MM-DD
+  if(c.date && c.date.length === 6){
+    $('fDate').value = '20' + c.date.slice(0,2) + '-' + c.date.slice(2,4) + '-' + c.date.slice(4,6);
+  } else {
+    $('fDate').value = '';
+  }
+
+  // 系列回填
+  const seriesOK = [...$('fSeries').options].some(o => o.value === c.series && o.value !== NEW_OPT);
+  if(seriesOK){
+    $('fSeries').value = c.series;
+    $('fSeriesNew').style.display = 'none';
+  } else if(c.series){
+    $('fSeries').value = NEW_OPT;
+    $('fSeriesNew').value = c.series;
+    $('fSeriesNew').style.display = 'block';
+  } else {
+    $('fSeries').value = '';
+    $('fSeriesNew').style.display = 'none';
+  }
+
+  // 负责人回填
+  const ownerOK = [...$('fOwner').options].some(o => o.value === c.owner && o.value !== NEW_OPT);
+  if(ownerOK){
+    $('fOwner').value = c.owner;
+    $('fOwnerNew').style.display = 'none';
+  } else if(c.owner){
+    $('fOwner').value = NEW_OPT;
+    $('fOwnerNew').value = c.owner;
+    $('fOwnerNew').style.display = 'block';
+  } else {
+    $('fOwner').value = '';
+    $('fOwnerNew').style.display = 'none';
+  }
+
+  $('btnAdd').textContent = editingId !== null ? t('updateBtn') : t('addBtn');
+  $('btnCancelEdit').textContent = LANG==='zh' ? '取消编辑' : 'Отменить';
+  $('btnCancelEdit').style.display = 'inline-block';
+  $('fModel').scrollIntoView({behavior:'smooth', block:'center'});
+  $('fModel').focus();
+}
+
+function cancelEdit(){
+  editingId = null;
+  $('fModel').value=''; $('fPrice').value=''; $('fNote').value=''; $('fDate').value='';
+  $('fSeries').value=''; $('fOwner').value='';
+  $('fSeriesNew').value=''; $('fSeriesNew').style.display='none';
+  $('fOwnerNew').value=''; $('fOwnerNew').style.display='none';
+  $('btnAdd').textContent = t('addBtn');
+  $('btnCancelEdit').style.display = 'none';
+}
+ 
 let toastTimer=null;
 function showToast(msg,type){
   const el=$('toast'); el.textContent=msg; el.className='toast '+type;
@@ -1264,6 +1357,7 @@ function setLang(lang){
   $('btnAdd').textContent = t('addBtn');
   $('btnExport').textContent = t('exportBtn');
   $('i18nHint').textContent = t('hint');
+  $('i18nManage').textContent = t('manageTitle');
   $('i18nFDate').textContent = t('fDate');
   $('i18nFOwner').textContent = t('fOwner');
   $('fSeriesNew').placeholder = t('fSeriesNewPh');
@@ -1292,41 +1386,39 @@ $('btnAdd').onclick=()=>{
   const model=$('fModel').value.trim();
   const price=parseFloat($('fPrice').value);
   const note=$('fNote').value.trim();
-  $('fSeries').addEventListener('change',()=>{
-  $('fSeriesNew').style.display = ($('fSeries').value === NEW_OPT) ? 'block' : 'none';
-});
-  $('fOwner').addEventListener('change',()=>{
-  $('fOwnerNew').style.display = ($('fOwner').value === NEW_OPT) ? 'block' : 'none';
-});
 
-  // 系列：下拉选择 或 新输入
   let series = $('fSeries').value;
   if(series === NEW_OPT) series = $('fSeriesNew').value.trim();
 
-  // 负责人：下拉选择 或 新输入
   let owner = $('fOwner').value;
   if(owner === NEW_OPT) owner = $('fOwnerNew').value.trim();
 
-  // 日期：YYYY-MM-DD → YYMMDD
   const dv = $('fDate').value;
   const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
 
   if(!model){showToast(t('needModel'),'err');$('fModel').focus();return;}
   if(!isFinite(price)||price<=0){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
 
-  CUSTOM.push({model,series,price,note,date,owner,ts:Date.now()});
+  if(editingId !== null){
+    const idx = CUSTOM.findIndex(x=>x.ts === editingId);
+    if(idx >= 0){
+      CUSTOM[idx] = {...CUSTOM[idx], model, series, price, note, date, owner};
+    }
+    editingId = null;
+    showToast(t('updated'),'ok');
+  } else {
+    CUSTOM.push({model,series,price,note,date,owner,ts:Date.now()});
+    showToast(t('added'),'ok');
+  }
+
   saveCustom(CUSTOM); rebuildDB();
-  refreshStats(); refreshSeriesOptions(); refreshFormOptions();
+  refreshStats(); refreshSeriesOptions(); refreshFormOptions(); renderOwnList();
 
-  // 清空表单
-  $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
-  $('fSeries').value='';$('fOwner').value='';
-  $('fSeriesNew').value='';$('fSeriesNew').style.display='none';
-  $('fOwnerNew').value='';$('fOwnerNew').style.display='none';
-
-  showToast(t('added'),'ok');
+  cancelEdit();
   $('q').value=model; doSearch();
 };
+
+$('btnCancelEdit').onclick = cancelEdit;
 
 $('btnExport').onclick=()=>{
   if(!CUSTOM.length){showToast(t('noExport'),'err');return;}
