@@ -1173,8 +1173,7 @@ function rebuildDB(){
   const map=new Map();
   const push=(model,series,price,date,owner,isCustom,complete)=>{
     if(!model || !isFinite(price) || price<=0) return;
-    // 自建数据：必须五项齐全（complete=true）才进入数据库
-    if(isCustom && !complete) return;
+    if(isCustom && !complete) return;   // 自建数据：五项齐全才进数据库
     const key=norm(model); if(!key) return;
     if(!map.has(key)) map.set(key,{model:String(model).trim(),series:series||'其它',records:[],custom:!!isCustom,key});
     const rec=map.get(key);
@@ -1324,6 +1323,7 @@ function refreshFormOptions(){
 function renderOwnList(){
   const el = $('ownList');
   const pending = CUSTOM.filter(c => !c.complete);
+  console.log('[待完善]', pending.map(c=>({model:c.model, complete:c.complete})));
   if(!pending.length){
     el.innerHTML = `<div style="padding:12px;color:#94a3b8;font-size:13px;text-align:center">${t('noCustomData')}</div>`;
     return;
@@ -1356,6 +1356,7 @@ function renderOwnList(){
     };
   });
 }
+ 
 let editingId = null;
 
 function startEdit(ts){
@@ -1518,44 +1519,43 @@ $('btnAdd').onclick=()=>{
 
   let series = $('fSeries').value;
   if(series === NEW_OPT) series = $('fSeriesNew').value.trim();
+  series = (series||'').trim();
 
   let owner = $('fOwner').value;
   if(owner === NEW_OPT) owner = $('fOwnerNew').value.trim();
+  owner = (owner||'').trim();
 
   const dv = $('fDate').value;
-  const hasDrawing = $('fDrawing').value === '1';
   const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
 
   if(!model){showToast(t('needModel'),'err');$('fModel').focus();return;}
   if(priceRaw !== '' && (!isFinite(price) || price <= 0)){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
 
-  // 五项基本信息：型号、系列、价格、日期、负责人 —— 全部有值才算完整
-  const isComplete = !!(
-    model && model.trim() &&
-    series && String(series).trim() &&
-    priceRaw !== '' && isFinite(price) && price > 0 &&
-    date && date.length === 6 &&
-    owner && String(owner).trim()
-  );
+  // 五项完整性判断（逐项严格校验）
+  const cModel  = !!model;
+  const cSeries = !!series;
+  const cPrice  = priceRaw !== '' && isFinite(price) && price > 0;
+  const cDate   = !!date && date.length === 6;
+  const cOwner  = !!owner;
+  const isComplete = cModel && cSeries && cPrice && cDate && cOwner;
+
+  // 调试输出：提交时在控制台打印五项状态，方便排查
+  console.log('[提交校验]', {model, series, priceRaw, date, owner, cModel, cSeries, cPrice, cDate, cOwner, isComplete});
+
   const savedPrice = isFinite(price) ? price : 0;
 
   if(editingId !== null){
     const idx = CUSTOM.findIndex(x=>x.ts === editingId);
     if(idx >= 0){
-      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, complete: isComplete};
+      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, complete: isComplete};
     }
     editingId = null;
-    showToast(isComplete ? t('addedToDb') : t('updated'),'ok');
+    showToast(isComplete ? t('addedToDb') : t('addedPending'),'ok');
   } else {
-    CUSTOM.push({model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, ts: Date.now(), complete: isComplete});
+    CUSTOM.push({model, series, price: savedPrice, note, date, owner, ts: Date.now(), complete: isComplete});
     showToast(isComplete ? t('addedToDb') : t('addedPending'),'ok');
   }
-  const drawKey = norm(model);
-  if(drawKey){
-    if(hasDrawing) DRAWINGS[drawKey] = true;
-    else delete DRAWINGS[drawKey];
-    saveDrawings();
-  }
+
   saveCustom(CUSTOM); rebuildDB();
   refreshStats(); refreshSeriesOptions(); refreshFormOptions(); renderOwnList();
 
