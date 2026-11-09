@@ -184,7 +184,7 @@ const I18N = {
     statModel:"收录型号数",
     statSeries:"覆盖系列",
     statQuote:"历史报价条数",
-    statOwn:"自建补充数据",
+    statOwn:"待完善数据",
     exactMatch:"完全匹配",
     similarMatch:"相似型号",
     matchPct:"匹配度",
@@ -223,7 +223,9 @@ const I18N = {
     editBtn:"编辑",
     updateBtn:"💾 更新报价",
     updated:"✅ 已更新",
-    noCustomData:"暂无自建数据",
+    addedToDb:"✅ 五项完整，已直接进入报价数据库",
+    addedPending:"📝 已保存为待完善数据",
+    noCustomData:"暂无待完善数据",
     manageTitle:"管理已添加的自建数据",
     priceLabel:"报价", owner:"负责人", date:"日期"
   },
@@ -238,7 +240,7 @@ const I18N = {
     statModel:"Моделей в базе",
     statSeries:"Серий",
     statQuote:"Исторических котировок",
-    statOwn:"Добавлено вручную",
+    statOwn:"Неполные данные",
     exactMatch:"Точное совпадение",
     similarMatch:"Похожие модели",
     matchPct:"Совпадение",
@@ -277,7 +279,9 @@ const I18N = {
     editBtn:"Изменить",
     updateBtn:"💾 Обновить",
     updated:"✅ Обновлено",
-    noCustomData:"Нет своих данных",
+    addedToDb:"✅ Все поля заполнены, добавлено в базу",
+    addedPending:"📝 Сохранено как неполные данные",
+    noCustomData:"Нет неполных данных",
     manageTitle:"Управление своими данными",
     priceLabel:"Цена", owner:"Ответственный", date:"Дата"
   }
@@ -1061,7 +1065,19 @@ function latestDate(it){
    4. 数据库
    ========================================================= */
 const LS_KEY='pump_quote_custom_v3';
-function loadCustom(){try{const a=JSON.parse(localStorage.getItem(LS_KEY)||'[]');return Array.isArray(a)?a.filter(x=>x&&x.model&&isFinite(x.price)&&x.price>0):[];}catch(e){return [];}}
+function loadCustom(){
+  try{
+    const a = JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+    if(!Array.isArray(a)) return [];
+    return a.filter(x=>x && x.model).map(x=>{
+      if(!isFinite(x.price)) x.price = 0;
+      if(typeof x.complete === 'undefined'){
+        x.complete = !!(x.model && x.series && x.price>0 && x.date && x.owner);
+      }
+      return x;
+    });
+  }catch(e){ return []; }
+}
 function saveCustom(list){localStorage.setItem(LS_KEY,JSON.stringify(list));}
 
 const LS_SERIES='pump_quote_series_v1';
@@ -1230,7 +1246,7 @@ function refreshStats(){
     $('statModel').textContent = DB.length;
     $('statSeries').textContent = new Set(DB.map(d=>d.series)).size;
     $('statQuote').textContent = DB.reduce((s,d)=>s+d.count,0);
-    $('statOwn').textContent = CUSTOM.length;
+    $('statOwn').textContent = CUSTOM.filter(c=>!c.complete).length;
     console.log('[Stats]', {models:DB.length, quotes:DB.reduce((s,d)=>s+d.count,0), custom:CUSTOM.length});
   }catch(e){ console.error('[Stats] error:', e); }
 }
@@ -1269,36 +1285,39 @@ function refreshFormOptions(){
  
 function renderOwnList(){
   const el = $('ownList');
-  if(!CUSTOM.length){
+  const pending = CUSTOM.filter(c => !c.complete);
+  if(!pending.length){
     el.innerHTML = `<div style="padding:12px;color:#94a3b8;font-size:13px;text-align:center">${t('noCustomData')}</div>`;
     return;
   }
-  el.innerHTML = CUSTOM.map((c,i)=>`
+  el.innerHTML = pending.map((c)=>`
     <div class="own-item">
-      <span class="n">${esc(c.model)}</span>
+      <span class="n">${esc(c.model||'—')}</span>
       ${c.series?`<span class="s">${esc(c.series)}</span>`:''}
+      ${c.price>0?`<span style="color:#dc2626;font-weight:600;font-size:13px">${fmt(c.price)}</span>`:''}
       ${c.date?`<span style="color:#64748b;font-size:12.5px">${formatDate(c.date,LANG)}</span>`:''}
       ${c.owner?`<span style="color:#64748b;font-size:12.5px">${esc(c.owner)}</span>`:''}
       ${c.note?`<span style="color:#94a3b8;font-size:12.5px">${esc(c.note)}</span>`:''}
-      <span class="p">${fmt(c.price)}</span>
       <button class="edit-btn" data-ts="${c.ts}">${t('editBtn')}</button>
-      <button class="danger" data-i="${i}">${t('delete')}</button>
+      <button class="danger" data-ts="${c.ts}">${t('delete')}</button>
     </div>`).join('');
+
   el.querySelectorAll('.edit-btn').forEach(btn=>{
     btn.onclick = () => startEdit(+btn.dataset.ts);
   });
   el.querySelectorAll('button.danger').forEach(btn=>{
     btn.onclick = () => {
-      const i = +btn.dataset.i;
-      if(editingId === CUSTOM[i].ts) cancelEdit();
-      CUSTOM.splice(i,1); saveCustom(CUSTOM); rebuildDB();
+      const ts = +btn.dataset.ts;
+      const idx = CUSTOM.findIndex(x => x.ts === ts);
+      if(idx < 0) return;
+      if(editingId === ts) cancelEdit();
+      CUSTOM.splice(idx,1); saveCustom(CUSTOM); rebuildDB();
       refreshStats(); refreshSeriesOptions(); refreshFormOptions(); renderOwnList();
       showToast(t('deleted'),'ok');
       const q = $('q').value.trim(); if(q) doSearch(); else resultsEl.innerHTML='';
     };
   });
 }
-
 let editingId = null;
 
 function startEdit(ts){
@@ -1440,7 +1459,8 @@ $('btnClear').onclick=()=>{$('q').value='';$('series').value='';resultsEl.innerH
 
 $('btnAdd').onclick=()=>{
   const model=$('fModel').value.trim();
-  const price=parseFloat($('fPrice').value);
+  const priceRaw=$('fPrice').value.trim();
+  const price=parseFloat(priceRaw);
   const note=$('fNote').value.trim();
 
   let series = $('fSeries').value;
@@ -1453,18 +1473,22 @@ $('btnAdd').onclick=()=>{
   const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
 
   if(!model){showToast(t('needModel'),'err');$('fModel').focus();return;}
-  if(!isFinite(price)||price<=0){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
+  if(priceRaw !== '' && (!isFinite(price) || price <= 0)){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
+
+  // 五项基本信息：型号、系列、价格、日期、负责人 —— 全部有值才算完整
+  const isComplete = !!(model && series && priceRaw !== '' && isFinite(price) && price > 0 && date && owner);
+  const savedPrice = isFinite(price) ? price : 0;
 
   if(editingId !== null){
     const idx = CUSTOM.findIndex(x=>x.ts === editingId);
     if(idx >= 0){
-      CUSTOM[idx] = {...CUSTOM[idx], model, series, price, note, date, owner};
+      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, complete: isComplete};
     }
     editingId = null;
-    showToast(t('updated'),'ok');
+    showToast(isComplete ? t('addedToDb') : t('updated'),'ok');
   } else {
-    CUSTOM.push({model,series,price,note,date,owner,ts:Date.now()});
-    showToast(t('added'),'ok');
+    CUSTOM.push({model, series, price: savedPrice, note, date, owner, ts: Date.now(), complete: isComplete});
+    showToast(isComplete ? t('addedToDb') : t('addedPending'),'ok');
   }
 
   saveCustom(CUSTOM); rebuildDB();
