@@ -125,11 +125,21 @@
       </div>
       <div class="field">
         <label id="i18nFSeries">所属系列</label>
-        <input id="fSeries" placeholder="如：AFP / BPO / QJ">
+        <select id="fSeries"></select>
+        <input id="fSeriesNew" placeholder="请输入新系列" style="display:none;margin-top:6px">
       </div>
       <div class="field">
         <label id="i18nFPrice">参考单价（元）*</label>
         <input id="fPrice" type="number" min="0" step="any" placeholder="如：39353">
+      </div>
+      <div class="field">
+        <label id="i18nFDate">报价日期</label>
+        <input id="fDate" type="date">
+      </div>
+      <div class="field">
+        <label id="i18nFOwner">负责人</label>
+        <select id="fOwner"></select>
+        <input id="fOwnerNew" placeholder="请输入新负责人" style="display:none;margin-top:6px">
       </div>
       <div class="field">
         <label id="i18nFNote">备注（可选）</label>
@@ -142,7 +152,7 @@
       <span class="toast" id="toast"></span>
     </div>
     <div class="hint" id="i18nHint">提示：补充的数据保存在本机浏览器（localStorage），刷新页面不会丢失；导出后可备份到其他设备。</div>
-    <div class="own-list" id="ownList"></div>
+    <div class="own-list" id="ownList" style="display:none"></div>
   </div>
 
 </div>
@@ -180,6 +190,12 @@ const I18N = {
     fSeries:"所属系列", fSeriesPh:"如：AFP / BPO / QJ",
     fPrice:"参考单价（元）*", fPricePh:"如：39353",
     fNote:"备注（可选）", fNotePh:"如：含税/不含电机",
+    fDate:"报价日期",
+    fOwner:"负责人",
+    fSeriesNewPh:"请输入新系列",
+    fOwnerNewPh:"请输入新负责人",
+    newSeries:"➕ 新增系列…",
+    newOwner:"➕ 新增负责人…",
     addBtn:"➕ 加入报价数据库",
     exportBtn:"导出我的数据",
     hint:"提示：补充的数据保存在本机浏览器（localStorage），刷新页面不会丢失；导出后可备份到其他设备。",
@@ -223,6 +239,12 @@ const I18N = {
     fSeries:"Серия", fSeriesPh:"Например: AFP / BPO / QJ",
     fPrice:"Цена (CNY) *", fPricePh:"Например: 39353",
     fNote:"Примечание (необязательно)", fNotePh:"Например: с НДС / без двигателя",
+    fDate:"Дата котировки",
+    fOwner:"Ответственный",
+    fSeriesNewPh:"Введите новую серию",
+    fOwnerNewPh:"Введите нового ответственного",
+    newSeries:"➕ Новая серия…",
+    newOwner:"➕ Новый ответственный…",
     addBtn:"➕ Добавить в базу",
     exportBtn:"Экспорт данных",
     hint:"Данные сохраняются в локальном хранилище браузера (localStorage) и не пропадают при обновлении страницы. Экспорт позволяет создать резервную копию.",
@@ -1144,7 +1166,31 @@ function refreshSeriesOptions(){
   sel.innerHTML=`<option value="">${t('allSeries')}</option>`+list.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');
   if(list.includes(cur)) sel.value=cur;
 }
+const NEW_OPT = '__new__';
 
+function refreshFormOptions(){
+  // 系列下拉
+  const sSel = $('fSeries');
+  const curS = sSel.value;
+  const sList = [...new Set(DB.map(d=>d.series))].filter(Boolean).sort((a,b)=>a.localeCompare(b,'zh'));
+  sSel.innerHTML = '<option value="">—</option>' +
+    sList.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('') +
+    `<option value="${NEW_OPT}">${t('newSeries')}</option>`;
+  if(sList.includes(curS) || curS === NEW_OPT) sSel.value = curS;
+
+  // 负责人下拉（从 RAW 和自建数据中提取）
+  const oSel = $('fOwner');
+  const curO = oSel.value;
+  const oSet = new Set();
+  RAW.forEach(r=>{ if(r[4]) oSet.add(r[4]); });
+  CUSTOM.forEach(c=>{ if(c.owner) oSet.add(c.owner); });
+  const oList = [...oSet].sort((a,b)=>a.localeCompare(b,'zh'));
+  oSel.innerHTML = '<option value="">—</option>' +
+    oList.map(o=>`<option value="${esc(o)}">${esc(o)}</option>`).join('') +
+    `<option value="${NEW_OPT}">${t('newOwner')}</option>`;
+  if(oList.includes(curO) || curO === NEW_OPT) oSel.value = curO;
+}
+ 
 function renderOwnList(){
   const el=$('ownList');
   if(!CUSTOM.length){el.innerHTML='';return;}
@@ -1218,6 +1264,10 @@ function setLang(lang){
   $('btnAdd').textContent = t('addBtn');
   $('btnExport').textContent = t('exportBtn');
   $('i18nHint').textContent = t('hint');
+  $('i18nFDate').textContent = t('fDate');
+  $('i18nFOwner').textContent = t('fOwner');
+  $('fSeriesNew').placeholder = t('fSeriesNewPh');
+  $('fOwnerNew').placeholder = t('fOwnerNewPh');
 
   const quickEl=$('quick');
   quickEl.innerHTML=`<span class="lbl">${t('quickLabel')}</span>`+QUICK.map(k=>`<span class="chip" data-k="${k}">${k}</span>`).join('');
@@ -1226,6 +1276,7 @@ function setLang(lang){
   refreshStats();
   refreshSeriesOptions();
   renderOwnList();
+  refreshFormOptions();
   if($('q').value.trim() || $('series').value) doSearch();
 }
 
@@ -1239,14 +1290,40 @@ $('btnClear').onclick=()=>{$('q').value='';$('series').value='';resultsEl.innerH
 
 $('btnAdd').onclick=()=>{
   const model=$('fModel').value.trim();
-  const series=$('fSeries').value.trim();
   const price=parseFloat($('fPrice').value);
   const note=$('fNote').value.trim();
+  $('fSeries').addEventListener('change',()=>{
+  $('fSeriesNew').style.display = ($('fSeries').value === NEW_OPT) ? 'block' : 'none';
+});
+  $('fOwner').addEventListener('change',()=>{
+  $('fOwnerNew').style.display = ($('fOwner').value === NEW_OPT) ? 'block' : 'none';
+});
+
+  // 系列：下拉选择 或 新输入
+  let series = $('fSeries').value;
+  if(series === NEW_OPT) series = $('fSeriesNew').value.trim();
+
+  // 负责人：下拉选择 或 新输入
+  let owner = $('fOwner').value;
+  if(owner === NEW_OPT) owner = $('fOwnerNew').value.trim();
+
+  // 日期：YYYY-MM-DD → YYMMDD
+  const dv = $('fDate').value;
+  const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
+
   if(!model){showToast(t('needModel'),'err');$('fModel').focus();return;}
   if(!isFinite(price)||price<=0){showToast(t('needPrice'),'err');$('fPrice').focus();return;}
-  CUSTOM.push({model,series,price,note,date:'',owner:'',ts:Date.now()});
-  saveCustom(CUSTOM); rebuildDB(); refreshStats(); refreshSeriesOptions(); renderOwnList();
-  $('fModel').value='';$('fSeries').value='';$('fPrice').value='';$('fNote').value='';
+
+  CUSTOM.push({model,series,price,note,date,owner,ts:Date.now()});
+  saveCustom(CUSTOM); rebuildDB();
+  refreshStats(); refreshSeriesOptions(); refreshFormOptions();
+
+  // 清空表单
+  $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
+  $('fSeries').value='';$('fOwner').value='';
+  $('fSeriesNew').value='';$('fSeriesNew').style.display='none';
+  $('fOwnerNew').value='';$('fOwnerNew').style.display='none';
+
   showToast(t('added'),'ok');
   $('q').value=model; doSearch();
 };
