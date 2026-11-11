@@ -96,6 +96,8 @@
   .manage-box[open] summary::before{transform:rotate(90deg)}
   .edit-btn{background:#dbeafe;color:#1d4ed8;height:34px;padding:0 12px;font-size:13px;border-radius:8px;border:none;cursor:pointer;font-weight:600}
   .edit-btn:hover{background:#bfdbfe;box-shadow:none;transform:none}
+  .edit-model-btn{height:28px;padding:0 12px;font-size:12.5px;border-radius:6px;border:none;background:#dbeafe;color:#1d4ed8;font-weight:600;cursor:pointer;white-space:nowrap}
+  .edit-model-btn:hover{background:#bfdbfe}
 </style>
 </head>
 <body>
@@ -245,6 +247,8 @@ const I18N = {
     drawingTip:"点击标记为有现成图纸",
     fDrawing:"是否有图纸",
     priceLabel:"报价", owner:"负责人", date:"日期"
+    editModel:"✏️ 编辑",
+    updatedModel:"✅ 型号已更新",
   },
   ru: {
     title:"Интеллектуальная система котировок насосов",
@@ -305,6 +309,8 @@ const I18N = {
     drawingTip:"Нажмите, чтобы отметить наличие готового чертежа",
     fDrawing:"Наличие чертежа",
     priceLabel:"Цена", owner:"Ответственный", date:"Дата"
+    editModel:"✏️ Изменить",
+    updatedModel:"✅ Модель обновлена",
   }
 };
 
@@ -1095,7 +1101,7 @@ function loadCustom(){
       if(typeof x.complete === 'undefined'){
         x.complete = !!(x.model && x.series && x.price>0 && x.date && x.date.length === 6 && x.owner);
       }
-      if(typeof x.drawing === 'undefined') x.drawing = false;
+      if(typeof x.override === 'undefined') x.override = false;
       return x;
     });
   }catch(e){ return []; }
@@ -1172,18 +1178,38 @@ function saveDrawings(){
 
 function rebuildDB(){
   const map=new Map();
+  const overrideInfo = new Map();
+  CUSTOM.forEach(c => {
+    if(c.override && c.complete && c.model) overrideInfo.set(norm(c.model), c);
+  });
+
   const push=(model,series,price,date,owner,isCustom,complete)=>{
     if(!model || !isFinite(price) || price<=0) return;
-    if(isCustom && !complete) return;   // 自建数据：五项齐全才进数据库
+    if(isCustom && !complete) return;
     const key=norm(model); if(!key) return;
     if(!map.has(key)) map.set(key,{model:String(model).trim(),series:series||'其它',records:[],custom:!!isCustom,key});
     const rec=map.get(key);
-    rec.records.push({price:Math.round(price),date:date||'',owner:owner||''});
+    const exists = rec.records.some(r => r.price === Math.round(price) && r.date === (date||'') && r.owner === (owner||''));
+    if(!exists) rec.records.push({price:Math.round(price),date:date||'',owner:owner||''});
     if(isCustom) rec.custom=true;
     if((!rec.series||rec.series==='其它') && series) rec.series=series;
   };
-  RAW.forEach(([m,s,p,d,o])=>push(m,s,p,d,o,false,true));
-  CUSTOM.forEach(c=>push(c.model,c.series,c.price,c.date||'',c.owner||'',true,!!c.complete));
+
+  // 先处理 override 记录
+  overrideInfo.forEach(c => push(c.model, c.series, c.price, c.date||'', c.owner||'', true, true));
+
+  // RAW：系列用 override 的（如果有）
+  RAW.forEach(([m,s,p,d,o]) => {
+    const k = norm(m);
+    const series = overrideInfo.has(k) ? (overrideInfo.get(k).series || s) : s;
+    push(m, series, p, d, o, false, true);
+  });
+
+  // 非 override 的 CUSTOM
+  CUSTOM.forEach(c => {
+    if(!c.override) push(c.model, c.series, c.price, c.date||'', c.owner||'', true, !!c.complete);
+  });
+
   DB=[...map.values()].map(r=>{
     const prices=r.records.map(x=>x.price).sort((a,b)=>a-b);
     const uniq=[...new Set(prices)];
@@ -1271,12 +1297,8 @@ function renderResults(list,query){
         <span class="drawing-tag${on?' on':''}" data-key="${esc(it.key)}" title="${esc(t('drawingTip'))}">${on ? t('withDrawing') : t('withoutDrawing')}</span>
         <span class="badge">${esc(it.series||t('other'))}</span>
         <span class="match">${t('matchPct')} ${pct}%</span>
+        <button class="edit-model-btn" data-key="${esc(it.key)}">${t('editModel')}</button>
       </div>
-      <div class="price">${priceText(it)}<small>${it.count>1?t('quoteCount',{n:it.count}):t('refPrice')}</small></div>
-      ${ldHtml}
-      <div class="meta">${t('disclaimer')}</div>
-      ${detailHtml}
-    </div>`;
   };
 
   if(exact.length) html+=`<h2 class="sec">${t('exactMatch')}</h2><div class="res">${exact.map(x=>card(x,true)).join('')}</div>`;
@@ -1367,6 +1389,8 @@ function renderOwnList(){
 }
  
 let editingId = null;
+let editingFromSearch = false;
+let editingModelKey = '';
 
 function startEdit(ts){
   const c = CUSTOM.find(x => x.ts === ts);
@@ -1421,7 +1445,67 @@ function startEdit(ts){
   $('fModel').focus();
 }
 
+function startEditFromSearch(it){
+  if(editingId !== null) cancelEdit();
+  editingFromSearch = true;
+  editingModelKey = it.key;
+  editingId = null;
+
+  $('fModel').value = it.model;
+
+  const latestRec = it.records.slice().sort((a,b)=>{
+    if(a.date < b.date) return 1;
+    if(a.date > b.date) return -1;
+    return 0;
+  })[0];
+
+  if(latestRec){
+    $('fPrice').value = latestRec.price;
+    $('fDate').value = (latestRec.date && latestRec.date.length === 6)
+      ? '20' + latestRec.date.slice(0,2) + '-' + latestRec.date.slice(2,4) + '-' + latestRec.date.slice(4,6)
+      : '';
+    if(latestRec.owner){
+      const ok = [...$('fOwner').options].some(o => o.value === latestRec.owner && o.value !== NEW_OPT);
+      if(ok){ $('fOwner').value = latestRec.owner; $('fOwnerNew').value = ''; }
+      else { $('fOwner').value = NEW_OPT; $('fOwnerNew').value = latestRec.owner; }
+    } else { $('fOwner').value = ''; $('fOwnerNew').value = ''; }
+  } else {
+    $('fPrice').value = ''; $('fDate').value = ''; $('fOwner').value = ''; $('fOwnerNew').value = '';
+  }
+  syncOwnerUI();
+
+  const sOk = [...$('fSeries').options].some(o => o.value === it.series && o.value !== NEW_OPT);
+  if(sOk){ $('fSeries').value = it.series; $('fSeriesNew').value = ''; }
+  else if(it.series){ $('fSeries').value = NEW_OPT; $('fSeriesNew').value = it.series; }
+  else { $('fSeries').value = ''; $('fSeriesNew').value = ''; }
+  syncSeriesUI();
+
+  $('fDrawing').value = DRAWINGS[it.key] ? '1' : '0';
+
+  const customRec = CUSTOM.find(c => norm(c.model) === it.key);
+  $('fNote').value = customRec ? (customRec.note || '') : '';
+
+  $('btnAdd').textContent = LANG==='zh' ? '💾 更新型号' : '💾 Обновить модель';
+  $('btnCancelEdit').textContent = LANG==='zh' ? '取消编辑' : 'Отменить';
+  $('btnCancelEdit').style.display = 'inline-block';
+  $('fModel').scrollIntoView({behavior:'smooth', block:'center'});
+  $('fModel').focus();
+}
+
 function cancelEdit(){
+  editingId = null;
+  editingFromSearch = false;
+  editingModelKey = '';
+  $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
+  $('fSeries').value='';$('fOwner').value='';
+  $('fSeriesNew').value='';$('fOwnerNew').value='';
+  $('fDrawing').value = '0';
+  syncSeriesUI(); syncOwnerUI();
+  $('btnAdd').textContent = t('addBtn');
+  $('btnCancelEdit').style.display = 'none';
+}
+ 
+ function cancelEdit(){
   editingId = null;
   $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
   $('fSeries').value='';$('fOwner').value='';
@@ -1508,14 +1592,22 @@ function setLang(lang){
    ========================================================= */
 resultsEl.addEventListener('click', (e)=>{
   const tag = e.target.closest('.drawing-tag');
-  if(!tag) return;
-  const key = tag.dataset.key;
-  if(DRAWINGS[key]) delete DRAWINGS[key];
-  else DRAWINGS[key] = true;
-  saveDrawings();
-  const on = !!DRAWINGS[key];
-  tag.classList.toggle('on', on);
-  tag.textContent = on ? t('withDrawing') : t('withoutDrawing');
+  if(tag){
+    const key = tag.dataset.key;
+    if(DRAWINGS[key]) delete DRAWINGS[key];
+    else DRAWINGS[key] = true;
+    saveDrawings();
+    const on = !!DRAWINGS[key];
+    tag.classList.toggle('on', on);
+    tag.textContent = on ? t('withDrawing') : t('withoutDrawing');
+    return;
+  }
+  const editBtn = e.target.closest('.edit-model-btn');
+  if(editBtn){
+    const key = editBtn.dataset.key;
+    const item = DB.find(d => d.key === key);
+    if(item) startEditFromSearch(item);
+  }
 });
 $('btnSearch').onclick=doSearch;
 $('q').addEventListener('keydown',e=>{if(e.key==='Enter') doSearch();});
@@ -1555,14 +1647,26 @@ $('btnAdd').onclick=()=>{
   const isComplete = true;
   const savedPrice = isFinite(price) ? price : 0;
 
-  if(editingId !== null){
+  if(editingFromSearch && editingModelKey){
+    const idx = CUSTOM.findIndex(c => norm(c.model) === editingModelKey);
+    if(idx >= 0){
+      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, complete: true, override: true};
+    } else {
+      CUSTOM.push({model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, ts: Date.now(), complete: true, override: true});
+    }
+    editingFromSearch = false;
+    editingModelKey = '';
+    showToast(t('updatedModel'), 'ok');
+  } else if(editingId !== null){
     const idx = CUSTOM.findIndex(x=>x.ts === editingId);
     if(idx >= 0){
       CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, complete: isComplete};
     }
     editingId = null;
+    showToast(t('addedToDb'),'ok');
   } else {
     CUSTOM.push({model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, ts: Date.now(), complete: isComplete});
+    showToast(t('addedToDb'),'ok');
   }
 
   // 关键：把表单里的图纸状态同步到 DRAWINGS，保证搜索结果标签一致
