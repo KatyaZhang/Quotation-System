@@ -1205,6 +1205,20 @@ function search(rawQuery,seriesFilter){
     if(s<0.6 && norm(item.series) && norm(item.series)===q) s=Math.max(s,0.62);
     if(s>=0.55) out.push({item,score:s});
   }
+
+  // 点击快捷系列标签（q 恰好是某个系列名）→ 按最近报价时间由近到远，显示全部
+  const isSeriesQuery = DB.some(d => norm(d.series) === q);
+  if(isSeriesQuery){
+    out.sort((a,b)=>{
+      const da = latestDate(a.item) || '000000';
+      const db = latestDate(b.item) || '000000';
+      if(da < db) return 1;
+      if(da > db) return -1;
+      return a.item.model.localeCompare(b.item.model,'zh');
+    });
+    return out;
+  }
+
   out.sort((a,b)=>{if(Math.abs(b.score-a.score)>0.001) return b.score-a.score; return a.item.model.localeCompare(b.item.model,'zh');});
   return out.slice(0,30);
 }
@@ -1435,7 +1449,15 @@ function doSearch(){
   const q=$('q').value.trim(); const sf=$('series').value;
   if(!q && !sf){resultsEl.innerHTML='';return;}
   if(!q){
-    const list=DB.filter(d=>d.series===sf).sort((a,b)=>a.model.localeCompare(b.model,'zh')).slice(0,30).map(item=>({item,score:0.99}));
+    const list=DB.filter(d=>d.series===sf)
+      .sort((a,b)=>{
+        const da = latestDate(a) || '000000';
+        const db = latestDate(b) || '000000';
+        if(da < db) return 1;
+        if(da > db) return -1;
+        return a.model.localeCompare(b.model,'zh');
+      })
+      .map(item=>({item,score:0.99}));
     renderResults(list,sf+(LANG==='zh'?' 系列':' серия'));
     return;
   }
@@ -1517,6 +1539,7 @@ $('btnAdd').onclick=()=>{
   const priceRaw=$('fPrice').value.trim();
   const price=parseFloat(priceRaw);
   const note=$('fNote').value.trim();
+  const hasDrawing = $('fDrawing').value === '1';
 
   let series = $('fSeries').value;
   if(series === NEW_OPT) series = $('fSeriesNew').value.trim();
@@ -1529,7 +1552,6 @@ $('btnAdd').onclick=()=>{
   const dv = $('fDate').value;
   const date = dv ? dv.slice(2,4) + dv.slice(5,7) + dv.slice(8,10) : '';
 
-  // 逐项收集缺失项
   const missing = [];
   if(!model) missing.push('型号名称');
   if(!series) missing.push('所属系列');
@@ -1539,21 +1561,28 @@ $('btnAdd').onclick=()=>{
 
   if(missing.length){
     showToast('请填写：' + missing.join('、'), 'err');
-    return;  // 直接阻止提交，避免产生无用的待完善记录
+    return;
   }
 
-  // 五项齐全，直接入库
   const isComplete = true;
   const savedPrice = isFinite(price) ? price : 0;
 
   if(editingId !== null){
     const idx = CUSTOM.findIndex(x=>x.ts === editingId);
     if(idx >= 0){
-      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, complete: isComplete};
+      CUSTOM[idx] = {...CUSTOM[idx], model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, complete: isComplete};
     }
     editingId = null;
   } else {
-    CUSTOM.push({model, series, price: savedPrice, note, date, owner, ts: Date.now(), complete: isComplete});
+    CUSTOM.push({model, series, price: savedPrice, note, date, owner, drawing: hasDrawing, ts: Date.now(), complete: isComplete});
+  }
+
+  // 关键：把表单里的图纸状态同步到 DRAWINGS，保证搜索结果标签一致
+  const drawKey = norm(model);
+  if(drawKey){
+    if(hasDrawing) DRAWINGS[drawKey] = true;
+    else delete DRAWINGS[drawKey];
+    saveDrawings();
   }
 
   saveCustom(CUSTOM); rebuildDB();
