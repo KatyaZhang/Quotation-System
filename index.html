@@ -1209,13 +1209,7 @@ function search(rawQuery,seriesFilter){
   // 点击快捷系列标签（q 恰好是某个系列名）→ 按最近报价时间由近到远，显示全部
   const isSeriesQuery = DB.some(d => norm(d.series) === q);
   if(isSeriesQuery){
-    out.sort((a,b)=>{
-      const da = latestDate(a.item) || '000000';
-      const db = latestDate(b.item) || '000000';
-      if(da < db) return 1;
-      if(da > db) return -1;
-      return a.item.model.localeCompare(b.item.model,'zh');
-    });
+    out.sort((a,b)=> b.item.model.localeCompare(a.item.model, 'zh', {numeric:true}));
     return out;
   }
 
@@ -1450,13 +1444,7 @@ function doSearch(){
   if(!q && !sf){resultsEl.innerHTML='';return;}
   if(!q){
     const list=DB.filter(d=>d.series===sf)
-      .sort((a,b)=>{
-        const da = latestDate(a) || '000000';
-        const db = latestDate(b) || '000000';
-        if(da < db) return 1;
-        if(da > db) return -1;
-        return a.model.localeCompare(b.model,'zh');
-      })
+      .sort((a,b)=> b.model.localeCompare(a.model, 'zh', {numeric:true}))
       .map(item=>({item,score:0.99}));
     renderResults(list,sf+(LANG==='zh'?' 系列':' серия'));
     return;
