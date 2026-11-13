@@ -246,7 +246,7 @@ const I18N = {
     withoutDrawing:"无图纸",
     drawingTip:"点击标记为有现成图纸",
     fDrawing:"是否有图纸",
-    priceLabel:"报价", owner:"负责人", date:"日期"
+    priceLabel:"报价", owner:"负责人", date:"日期",
     editModel:"✏️ 编辑",
     updatedModel:"✅ 型号已更新",
   },
@@ -308,7 +308,7 @@ const I18N = {
     withoutDrawing:"Без чертежа",
     drawingTip:"Нажмите, чтобы отметить наличие готового чертежа",
     fDrawing:"Наличие чертежа",
-    priceLabel:"Цена", owner:"Ответственный", date:"Дата"
+    priceLabel:"Цена", owner:"Ответственный", date:"Дата",
     editModel:"✏️ Изменить",
     updatedModel:"✅ Модель обновлена",
   }
@@ -1299,6 +1299,23 @@ function renderResults(list,query){
         <span class="match">${t('matchPct')} ${pct}%</span>
         <button class="edit-model-btn" data-key="${esc(it.key)}">${t('editModel')}</button>
       </div>
+      <div class="price">${priceText(it)}<small>${it.count>1?t('quoteCount',{n:it.count}):t('refPrice')}</small></div>
+      ${ldHtml}
+      <div class="meta">${t('disclaimer')}</div>
+      ${detailHtml}
+    </div>`;
+  };
+
+    const on = !!DRAWINGS[it.key];
+
+    return `<div class="res-card${isSelf?' self':''}">
+      <div class="res-top">
+        <span class="model">${esc(it.model)}</span>
+        <span class="drawing-tag${on?' on':''}" data-key="${esc(it.key)}" title="${esc(t('drawingTip'))}">${on ? t('withDrawing') : t('withoutDrawing')}</span>
+        <span class="badge">${esc(it.series||t('other'))}</span>
+        <span class="match">${t('matchPct')} ${pct}%</span>
+        <button class="edit-model-btn" data-key="${esc(it.key)}">${t('editModel')}</button>
+      </div>
   };
 
   if(exact.length) html+=`<h2 class="sec">${t('exactMatch')}</h2><div class="res">${exact.map(x=>card(x,true)).join('')}</div>`;
@@ -1440,7 +1457,6 @@ function startEdit(ts){
 
   $('btnAdd').textContent = editingId !== null ? t('updateBtn') : t('addBtn');
   $('btnCancelEdit').textContent = LANG==='zh' ? '取消编辑' : 'Отменить';
-  $('btnCancelEdit').style.display = 'inline-block';
   $('fModel').scrollIntoView({behavior:'smooth', block:'center'});
   $('fModel').focus();
 }
@@ -1496,17 +1512,6 @@ function cancelEdit(){
   editingId = null;
   editingFromSearch = false;
   editingModelKey = '';
-  $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
-  $('fSeries').value='';$('fOwner').value='';
-  $('fSeriesNew').value='';$('fOwnerNew').value='';
-  $('fDrawing').value = '0';
-  syncSeriesUI(); syncOwnerUI();
-  $('btnAdd').textContent = t('addBtn');
-  $('btnCancelEdit').style.display = 'none';
-}
- 
- function cancelEdit(){
-  editingId = null;
   $('fModel').value='';$('fPrice').value='';$('fNote').value='';$('fDate').value='';
   $('fSeries').value='';$('fOwner').value='';
   $('fSeriesNew').value='';$('fOwnerNew').value='';
